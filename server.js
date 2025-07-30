@@ -1,3 +1,4 @@
+// server.js
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -16,14 +17,15 @@ app.use(express.json({ limit: "2mb" }));
 
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
-// 🔹 Rutas básicas (ejemplo)
+// ================== Ruta básica (prueba de vida) ==================
 app.get("/", (req, res) => {
-  res.json({ ok: true });
+  res.json({ ok: true, service: "wasender-railway-bridge", version: "1.0.3" });
 });
 
-// 🔹 PEGA EL WEBHOOK **DESPUÉS DE DEFINIR app**
+// ================== Webhook de Wasender ==================
 app.post("/webhook/wasender", async (req, res) => {
   try {
+    // Si usas WEBHOOK_SECRET para validar que el POST viene de Wasender
     if (WEBHOOK_SECRET) {
       const secret = req.header("X-Webhook-Secret");
       if (secret !== WEBHOOK_SECRET) {
@@ -32,6 +34,8 @@ app.post("/webhook/wasender", async (req, res) => {
     }
 
     const payload = req.body || {};
+
+    // Texto recibido
     const responseText =
       payload.caption ||
       payload.text ||
@@ -39,6 +43,7 @@ app.post("/webhook/wasender", async (req, res) => {
       payload.body ||
       "(Mensaje recibido sin texto)";
 
+    // Detectar archivo adjunto (PDF o imagen)
     const fileUrl =
       payload.fileUrl ||
       payload.mediaUrl ||
@@ -50,12 +55,14 @@ app.post("/webhook/wasender", async (req, res) => {
       payload?.file?.url ||
       null;
 
+    // Buscar la última consulta en estado "sent"
     const lastUnanswered = await getLastUnanswered();
     if (!lastUnanswered) {
       console.warn("Webhook recibido pero no hay conversación 'sent' pendiente");
       return res.sendStatus(200);
     }
 
+    // Marcar como respondido en la base de datos
     await markResponded({
       id: lastUnanswered.id,
       responseText: fileUrl ? "Resultado con archivo adjunto" : responseText,
@@ -69,7 +76,7 @@ app.post("/webhook/wasender", async (req, res) => {
   }
 });
 
-// 🔹 Puerto
+// ================== Puerto ==================
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`API listening on port ${PORT}`);
