@@ -1,15 +1,14 @@
 import axios from "axios";
 
-const WASENDER_ENDPOINT = "https://api.wasenderapi.com/send-message";
+const WASENDER_ENDPOINT = "https://wasenderapi.com/api/send-message";
 
 /**
  * Envía un comando al número objetivo (bot) usando WasenderAPI.
- * Ahora el token va en el HEADER Authorization.
  */
 export async function sendViaWasender({ token, to, message }) {
   const payload = {
-    to,
-    message
+    to,          // número del bot
+    text: message // WasenderAPI usa "text", no "message"
   };
 
   const resp = await axios.post(WASENDER_ENDPOINT, payload, {
