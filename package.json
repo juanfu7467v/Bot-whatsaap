@@ -1,12 +1,15 @@
 {
   "name": "wasender-railway-bridge",
-  "version": "1.0.0",
-  "description": "Bridge API: AppCreator24 <-> Railway <-> WasenderAPI <-> Bot WhatsApp",
+  "version": "1.0.2",
+  "description": "Bridge API: AppCreator24 <-> Railway <-> WasenderAPI <-> WhatsApp Bot",
   "main": "server.js",
   "type": "module",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
     "axios": "^1.7.2",
