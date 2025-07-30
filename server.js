@@ -1,91 +1,63 @@
-// === Helpers para extraer texto y URL de archivo del payload ===
-function extractText(payload = {}) {
-  if (typeof payload.message === "string") return payload.message;
-  if (payload?.message?.text) return payload.message.text;
-  if (payload.caption) return payload.caption;
-  if (payload.text) return payload.text;
-  if (payload.body) return payload.body;
-  return "(Mensaje recibido sin texto)";
-}
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
 
-function extractFileUrl(payload = {}) {
-  // Cubrimos variantes comunes que envían proveedores/SDKs
-  return (
-    payload.fileUrl ||
-    payload.mediaUrl ||
-    payload?.message?.fileUrl ||
-    payload?.message?.mediaUrl ||
-    payload?.document?.url ||
-    payload?.document?.link ||
-    payload?.media?.url ||
-    payload?.file?.url ||
-    null
-  );
-}
+import {
+  getConversation,
+  getLastUnanswered,
+  markResponded
+} from "./db.js";
 
-// === WEBHOOK de WasenderAPI ===
-// Configura en tu panel de WasenderAPI:
-// URL (POST): https://TU-APP.up.railway.app/webhook/wasender
-// Si usas WEBHOOK_SECRET en Railway, Wasender debe poder enviar el header X-Webhook-Secret
+dotenv.config();
+
+const app = express();
+app.use(cors());
+app.use(express.json({ limit: "2mb" }));
+
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
+
+// 🔹 Rutas básicas (ejemplo)
+app.get("/", (req, res) => {
+  res.json({ ok: true });
+});
+
+// 🔹 PEGA EL WEBHOOK **DESPUÉS DE DEFINIR app**
 app.post("/webhook/wasender", async (req, res) => {
   try {
-    // 1) Validación opcional con secreto compartido
-    if (typeof WEBHOOK_SECRET !== "undefined" && WEBHOOK_SECRET) {
+    if (WEBHOOK_SECRET) {
       const secret = req.header("X-Webhook-Secret");
       if (secret !== WEBHOOK_SECRET) {
         return res.status(401).json({ error: "Unauthorized" });
       }
     }
 
-    // 2) Leemos el payload y extraemos texto + posible URL de archivo
     const payload = req.body || {};
-    const responseText = extractText(payload);
-    const fileUrl = extractFileUrl(payload);
+    const responseText =
+      payload.caption ||
+      payload.text ||
+      payload?.message?.text ||
+      payload.body ||
+      "(Mensaje recibido sin texto)";
 
-    // 3) Intentar correlacionar por ID si viene en el webhook
-    //    Ajusta/añade campos si tu proveedor incluye alguna referencia propia.
-    const candidateIds = [
-      payload.idConsulta,
-      payload.client_ref,
-      payload.clientRef,
-      payload.referenceId,
-      payload.refId,
-      payload.id,
-      payload.messageId,
-      payload?.context?.id,
-      req.query?.id
-    ].filter(Boolean);
+    const fileUrl =
+      payload.fileUrl ||
+      payload.mediaUrl ||
+      payload?.message?.fileUrl ||
+      payload?.message?.mediaUrl ||
+      payload?.document?.url ||
+      payload?.document?.link ||
+      payload?.media?.url ||
+      payload?.file?.url ||
+      null;
 
-    let targetId = null;
-
-    // Si tu db.js expone getConversation, intenta validar el ID
-    if (candidateIds.length) {
-      for (const cand of candidateIds) {
-        try {
-          const row = await getConversation(cand);
-          if (row && (row.status === "sent" || row.status === "created")) {
-            targetId = row.id;
-            break;
-          }
-        } catch (_) {
-          // ignoramos errores por ID inexistente
-        }
-      }
+    const lastUnanswered = await getLastUnanswered();
+    if (!lastUnanswered) {
+      console.warn("Webhook recibido pero no hay conversación 'sent' pendiente");
+      return res.sendStatus(200);
     }
 
-    // 4) Si no hubo ID válido, usar fallback: última conversación en 'sent'
-    if (!targetId) {
-      const lastUnanswered = await getLastUnanswered();
-      if (!lastUnanswered) {
-        console.warn('Webhook recibido pero no hay conversación "sent" pendiente');
-        return res.sendStatus(200);
-      }
-      targetId = lastUnanswered.id;
-    }
-
-    // 5) Guardar respuesta en la conversación objetivo
     await markResponded({
-      id: targetId,
+      id: lastUnanswered.id,
       responseText: fileUrl ? "Resultado con archivo adjunto" : responseText,
       responseRaw: JSON.stringify({ ...payload, fileUrl })
     });
@@ -95,4 +67,10 @@ app.post("/webhook/wasender", async (req, res) => {
     console.error("Error /webhook/wasender:", err);
     return res.status(500).json({ error: "Error processing webhook" });
   }
+});
+
+// 🔹 Puerto
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => {
+  console.log(`API listening on port ${PORT}`);
 });
