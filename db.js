@@ -1,3 +1,4 @@
+// db.js
 import sqlite3 from "sqlite3";
 import fs from "fs";
 import path from "path";
@@ -6,7 +7,7 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Asegura la carpeta ./data
+// Asegura carpeta ./data (en Railway es efímera)
 const dataDir = path.join(__dirname, "data");
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
@@ -16,7 +17,7 @@ const dbPath = path.join(dataDir, "data.db");
 sqlite3.verbose();
 export const db = new sqlite3.Database(dbPath);
 
-// Crear tablas si no existen
+// Tablas
 db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS conversations (
@@ -25,7 +26,7 @@ db.serialize(() => {
       to_number TEXT NOT NULL,
       status TEXT NOT NULL,                 -- 'created' | 'sent' | 'responded' | 'error'
       response_text TEXT,
-      response_raw TEXT,                    -- JSON string
+      response_raw TEXT,                    -- JSON del webhook
       created_at INTEGER NOT NULL,          -- epoch ms
       sent_at INTEGER,
       responded_at INTEGER,
@@ -38,7 +39,8 @@ export function createConversation({ id, command, toNumber }) {
   return new Promise((resolve, reject) => {
     const now = Date.now();
     db.run(
-      `INSERT INTO conversations (id, command, to_number, status, created_at) VALUES (?, ?, ?, 'created', ?)`,
+      `INSERT INTO conversations (id, command, to_number, status, created_at)
+       VALUES (?, ?, ?, 'created', ?)`,
       [id, command, toNumber, now],
       function (err) {
         if (err) return reject(err);
@@ -100,11 +102,16 @@ export function getConversation(id) {
   });
 }
 
+/**
+ * Antes buscaba sólo status='sent'.
+ * Ahora acepta 'sent' o 'created' (p.ej., si el webhook llega muy rápido o
+ * si un envío fue rate-limited y la fila quedó en 'created').
+ */
 export function getLastUnanswered() {
   return new Promise((resolve, reject) => {
     db.get(
       `SELECT * FROM conversations
-       WHERE status='sent'
+       WHERE status IN ('sent','created')
        ORDER BY created_at DESC
        LIMIT 1`,
       [],
