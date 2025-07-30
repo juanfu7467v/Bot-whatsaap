@@ -4,7 +4,6 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { v4 as uuid } from "uuid";
 
-// Asegúrate que db.js esté en el mismo directorio y exporte estas funciones
 import {
   createConversation,
   markSent,
@@ -15,7 +14,6 @@ import {
   getLastUnanswered
 } from "./db.js";
 
-// Import robusto: funciona si wasender.js exporta named o default
 import * as Wasender from "./wasender.js";
 const sendViaWasender = Wasender.sendViaWasender ?? Wasender.default;
 if (typeof sendViaWasender !== "function") {
@@ -28,26 +26,24 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 const WASENDER_TOKEN = process.env.WASENDER_TOKEN;
-const BOT_NUMBER = process.env.BOT_NUMBER; // Ej: "+51974212489"
+const BOT_NUMBER = process.env.BOT_NUMBER;     // Ej: "+51974212489" (con +)
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET; // opcional
 
-// Health
+// -------- Health --------
 app.get("/", (_req, res) => {
   res.json({
     ok: true,
     service: "wasender-railway-bridge",
-    version: "1.0.2"
+    version: "1.0.4"
   });
 });
 
-/**
- * Enviar comando al bot
- * Body: { "command": "/c4 01234567" }
- * Responde: { id, status: "sent" }
- */
+// -------- Enviar comando --------
+// Body: { "command": "/c4 01234567" }
 app.post("/api/send", async (req, res) => {
+  let id;
   try {
     if (!WASENDER_TOKEN) {
       return res.status(500).json({ error: "Missing WASENDER_TOKEN env var" });
@@ -61,47 +57,57 @@ app.post("/api/send", async (req, res) => {
       return res.status(400).json({ error: 'Send body like { "command": "/c4 01234567" }' });
     }
 
-    const id = uuid();
-
+    id = uuid();
     await createConversation({ id, command: command.trim(), toNumber: BOT_NUMBER });
 
-    // Enviar por WasenderAPI
+    // Enviar a Wasender
     await sendViaWasender({
       token: WASENDER_TOKEN,
-      to: BOT_NUMBER,            // Debe ser el número del bot XDATA (con +)
+      to: BOT_NUMBER,
       message: command.trim()
     });
 
     await markSent({ id });
-
     return res.status(202).json({ id, status: "sent" });
+
   } catch (err) {
-    console.error("Error /api/send:", err?.response?.data || err.message);
-    // Si alcanzaste a crear la conversación y enviar falló, marca error
-    try {
-      if (err?.config?.data) {
-        const parsed = JSON.parse(err.config.data);
-        // no tenemos id aquí salvo que haya fallado después del insert...
-      }
-    } catch {}
+    const details = err?.response?.data || err?.message || "Unknown error";
+    console.error("Error /api/send:", details);
+
+    // Marca error para no dejar filas 'created' huérfanas
+    if (id) {
+      const msg = typeof details === "string" ? details : JSON.stringify(details);
+      await markError({ id, errorMessage: msg });
+    }
+
+    // Manejo especial para rate-limit (free trial)
+    // Wasender suele enviar { message: "...cada minuto", retry_after: <segundos> }
+    const data = err?.response?.data;
+    const retryAfter =
+      data?.retry_after || data?.reintentar_despues || data?.reintentar_después || null;
+
+    if (retryAfter !== null && retryAfter !== undefined) {
+      return res.status(429).json({
+        error: "rate_limited",
+        message: "Estás en free trial: 1 mensaje por minuto.",
+        retry_after: retryAfter
+      });
+    }
+
     return res.status(500).json({
       error: "Failed to send command to WasenderAPI",
-      details: err?.response?.data || err.message
+      details: details
     });
   }
 });
 
-/**
- * Consultar resultado
- * GET /api/result/:id
- * Devuelve response_text y file_url si hay archivo (PDF/imagen)
- */
+// -------- Consultar resultado --------
+// GET /api/result/:id
 app.get("/api/result/:id", async (req, res) => {
   try {
     const row = await getConversation(req.params.id);
     if (!row) return res.status(404).json({ error: "Not found" });
 
-    // extraer posible URL de media del payload crudo
     let fileUrl = null;
     try {
       const raw = row.response_raw ? JSON.parse(row.response_raw) : null;
@@ -111,10 +117,9 @@ app.get("/api/result/:id", async (req, res) => {
         else if (raw?.message?.fileUrl) fileUrl = raw.message.fileUrl;
         else if (raw?.message?.mediaUrl) fileUrl = raw.message.mediaUrl;
         else if (raw?.document?.url) fileUrl = raw.document.url;
-        else if (raw?.media?.url) fileUrl = raw.media.url;
-        // algunos proveedores usan "file" o "document" con "link"
-        else if (raw?.file?.url) fileUrl = raw.file.url;
         else if (raw?.document?.link) fileUrl = raw.document.link;
+        else if (raw?.media?.url) fileUrl = raw.media.url;
+        else if (raw?.file?.url) fileUrl = raw.file.url;
       }
     } catch (e) {
       console.log("Cannot parse response_raw:", e?.message);
@@ -136,10 +141,7 @@ app.get("/api/result/:id", async (req, res) => {
   }
 });
 
-/**
- * Listado (debug)
- * GET /api/conversations?limit=20
- */
+// -------- Listado (debug) --------
 app.get("/api/conversations", async (req, res) => {
   try {
     const limit = Math.max(1, Math.min(200, parseInt(req.query.limit) || 50));
@@ -151,14 +153,33 @@ app.get("/api/conversations", async (req, res) => {
   }
 });
 
-/**
- * Webhook entrante de WasenderAPI
- * Configura en Wasender: https://<tu-app>.railway.app/webhook/wasender
- * Header secreto opcional: X-Webhook-Secret: <WEBHOOK_SECRET>
- */
+// ===== Helpers para texto/archivo (webhook) =====
+function extractText(payload = {}) {
+  if (typeof payload.message === "string") return payload.message;
+  if (payload?.message?.text) return payload.message.text;
+  if (payload.caption) return payload.caption;
+  if (payload.text) return payload.text;
+  if (payload.body) return payload.body;
+  return "(Mensaje recibido sin texto)";
+}
+
+function extractFileUrl(payload = {}) {
+  return (
+    payload.fileUrl ||
+    payload.mediaUrl ||
+    payload?.message?.fileUrl ||
+    payload?.message?.mediaUrl ||
+    payload?.document?.url ||
+    payload?.document?.link ||
+    payload?.media?.url ||
+    payload?.file?.url ||
+    null
+  );
+}
+
+// -------- Webhook de Wasender --------
 app.post("/webhook/wasender", async (req, res) => {
   try {
-    // Validación opcional
     if (WEBHOOK_SECRET) {
       const secret = req.header("X-Webhook-Secret");
       if (secret !== WEBHOOK_SECRET) {
@@ -167,36 +188,47 @@ app.post("/webhook/wasender", async (req, res) => {
     }
 
     const payload = req.body || {};
+    const responseText = extractText(payload);
+    const fileUrl = extractFileUrl(payload);
 
-    // Texto/caption
-    let responseText =
-      payload.caption ||
-      payload.text ||
-      payload?.message?.text ||
-      payload.body ||
-      "(Mensaje recibido sin texto)";
+    // Correlación por ID (si algún día Wasender incluye referencia del cliente)
+    const candidateIds = [
+      payload.idConsulta,
+      payload.client_ref,
+      payload.clientRef,
+      payload.referenceId,
+      payload.refId,
+      payload.id,
+      payload.messageId,
+      payload?.context?.id,
+      req.query?.id
+    ].filter(Boolean);
 
-    // URL del archivo (PDF/imagen) — cubre variantes comunes
-    const fileUrl =
-      payload.fileUrl ||
-      payload.mediaUrl ||
-      payload?.message?.fileUrl ||
-      payload?.message?.mediaUrl ||
-      payload?.document?.url ||
-      payload?.media?.url ||
-      payload?.file?.url ||
-      payload?.document?.link ||
-      null;
+    let targetId = null;
+    if (candidateIds.length) {
+      for (const cand of candidateIds) {
+        try {
+          const row = await getConversation(String(cand));
+          if (row && (row.status === "sent" || row.status === "created")) {
+            targetId = row.id;
+            break;
+          }
+        } catch {}
+      }
+    }
 
-    // Asociar a la última conversación pendiente (status='sent')
-    const lastUnanswered = await getLastUnanswered();
-    if (!lastUnanswered) {
-      console.warn("Webhook recibido pero no hay conversación 'sent' pendiente");
-      return res.sendStatus(200);
+    // Fallback: última 'sent' o 'created'
+    if (!targetId) {
+      const pending = await getLastUnanswered();
+      if (!pending) {
+        console.warn('Webhook recibido pero no hay conversación "sent/created" pendiente');
+        return res.sendStatus(200);
+      }
+      targetId = pending.id;
     }
 
     await markResponded({
-      id: lastUnanswered.id,
+      id: targetId,
       responseText: fileUrl ? "Resultado con archivo adjunto" : responseText,
       responseRaw: JSON.stringify({ ...payload, fileUrl })
     });
@@ -208,6 +240,7 @@ app.post("/webhook/wasender", async (req, res) => {
   }
 });
 
+// -------- Listen --------
 app.listen(PORT, () => {
   console.log(`API listening on port ${PORT}`);
 });
