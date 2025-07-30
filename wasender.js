@@ -4,16 +4,21 @@ const WASENDER_ENDPOINT = "https://api.wasenderapi.com/send-message";
 
 /**
  * Envía un comando al número objetivo (bot) usando WasenderAPI.
- * Ajusta el payload según el contrato real de tu cuenta Wasender.
+ * Ahora el token va en el HEADER Authorization.
  */
 export async function sendViaWasender({ token, to, message }) {
-  // Ejemplo simple: { token, to, message }
-  const payload = { token, to, message };
+  const payload = {
+    to,
+    message
+  };
 
   const resp = await axios.post(WASENDER_ENDPOINT, payload, {
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
     timeout: 15000
   });
 
-  // Puedes loguear resp.data para ver la forma real y guardar IDs si los hay
   return resp.data;
 }
