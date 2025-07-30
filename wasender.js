@@ -1,23 +1,34 @@
-import axios from "axios";
+app.post("/webhook/wasender", async (req, res) => {
+  try {
+    const payload = req.body || {};
 
-const WASENDER_ENDPOINT = "https://wasenderapi.com/api/send-message";
+    // Texto
+    const responseText = payload.caption || payload.text || payload.message?.text || "(Mensaje recibido sin texto)";
 
-/**
- * Envía un comando al número objetivo (bot) usando WasenderAPI.
- */
-export async function sendViaWasender({ token, to, message }) {
-  const payload = {
-    to,          // número del bot
-    text: message // WasenderAPI usa "text", no "message"
-  };
+    // URL del archivo (PDF o imagen)
+    const fileUrl =
+      payload.mediaUrl ||
+      payload.fileUrl ||
+      payload.document?.url ||
+      payload.media?.url ||
+      payload.message?.mediaUrl ||
+      null;
 
-  const resp = await axios.post(WASENDER_ENDPOINT, payload, {
-    headers: {
-      "Authorization": `Bearer ${token}`,
-      "Content-Type": "application/json"
-    },
-    timeout: 15000
-  });
+    const lastUnanswered = await getLastUnanswered();
+    if (!lastUnanswered) {
+      console.warn("Webhook recibido sin consultas pendientes");
+      return res.sendStatus(200);
+    }
 
-  return resp.data;
-}
+    await markResponded({
+      id: lastUnanswered.id,
+      responseText: fileUrl ? "Resultado con archivo adjunto" : responseText,
+      responseRaw: JSON.stringify({ ...payload, fileUrl })
+    });
+
+    res.sendStatus(200);
+  } catch (err) {
+    console.error("Error webhook:", err);
+    res.sendStatus(500);
+  }
+});
