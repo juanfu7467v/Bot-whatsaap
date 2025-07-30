@@ -1,34 +1,30 @@
-app.post("/webhook/wasender", async (req, res) => {
-  try {
-    const payload = req.body || {};
+// wasender.js
+import axios from "axios";
 
-    // Texto
-    const responseText = payload.caption || payload.text || payload.message?.text || "(Mensaje recibido sin texto)";
+const WASENDER_ENDPOINT = "https://wasenderapi.com/api/send-message";
 
-    // URL del archivo (PDF o imagen)
-    const fileUrl =
-      payload.mediaUrl ||
-      payload.fileUrl ||
-      payload.document?.url ||
-      payload.media?.url ||
-      payload.message?.mediaUrl ||
-      null;
+/**
+ * Envía un texto (comando) al número objetivo usando WasenderAPI.
+ * - token: tu token Bearer de Wasender
+ * - to: número destino, ejemplo "+51974212489" (con +)
+ * - message: texto a enviar, ejemplo "/c4 01234567"
+ */
+export async function sendViaWasender({ token, to, message }) {
+  const payload = {
+    to,
+    text: message // Wasender espera "text" (no "message")
+  };
 
-    const lastUnanswered = await getLastUnanswered();
-    if (!lastUnanswered) {
-      console.warn("Webhook recibido sin consultas pendientes");
-      return res.sendStatus(200);
-    }
+  const resp = await axios.post(WASENDER_ENDPOINT, payload, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    timeout: 15000
+  });
 
-    await markResponded({
-      id: lastUnanswered.id,
-      responseText: fileUrl ? "Resultado con archivo adjunto" : responseText,
-      responseRaw: JSON.stringify({ ...payload, fileUrl })
-    });
+  return resp.data;
+}
 
-    res.sendStatus(200);
-  } catch (err) {
-    console.error("Error webhook:", err);
-    res.sendStatus(500);
-  }
-});
+// Export default también (por compatibilidad si haces import default)
+export default sendViaWasender;
