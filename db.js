@@ -7,7 +7,7 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Asegura carpeta ./data (en Railway es efímera)
+// Carpeta ./data (en Railway es efímera; para persistencia real usa Postgres)
 const dataDir = path.join(__dirname, "data");
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
@@ -17,31 +17,40 @@ const dbPath = path.join(dataDir, "data.db");
 sqlite3.verbose();
 export const db = new sqlite3.Database(dbPath);
 
-// Tablas
+// Crear tablas si no existen
 db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS conversations (
       id TEXT PRIMARY KEY,
       command TEXT NOT NULL,
       to_number TEXT NOT NULL,
-      status TEXT NOT NULL,                 -- 'created' | 'sent' | 'responded' | 'error'
+      user_number TEXT,                    -- NUEVO: número del usuario solicitante
+      status TEXT NOT NULL,                -- 'created' | 'sent' | 'responded' | 'error'
       response_text TEXT,
-      response_raw TEXT,                    -- JSON del webhook
-      created_at INTEGER NOT NULL,          -- epoch ms
+      response_raw TEXT,                   -- JSON string del webhook UltraMsg
+      created_at INTEGER NOT NULL,         -- epoch ms
       sent_at INTEGER,
       responded_at INTEGER,
       error_message TEXT
     )
   `);
+
+  // Intentar agregar columna user_number si venías de una versión vieja
+  db.run(`ALTER TABLE conversations ADD COLUMN user_number TEXT`, (err) => {
+    // Si ya existe, ignorar error
+    if (err && !String(err.message).includes("duplicate column name")) {
+      console.warn("ALTER TABLE user_number:", err.message);
+    }
+  });
 });
 
-export function createConversation({ id, command, toNumber }) {
+export function createConversation({ id, command, toNumber, userNumber }) {
   return new Promise((resolve, reject) => {
     const now = Date.now();
     db.run(
-      `INSERT INTO conversations (id, command, to_number, status, created_at)
-       VALUES (?, ?, ?, 'created', ?)`,
-      [id, command, toNumber, now],
+      `INSERT INTO conversations (id, command, to_number, user_number, status, created_at)
+       VALUES (?, ?, ?, ?, 'created', ?)`,
+      [id, command, toNumber, userNumber || null, now],
       function (err) {
         if (err) return reject(err);
         resolve({ id });
@@ -103,9 +112,8 @@ export function getConversation(id) {
 }
 
 /**
- * Antes buscaba sólo status='sent'.
- * Ahora acepta 'sent' o 'created' (p.ej., si el webhook llega muy rápido o
- * si un envío fue rate-limited y la fila quedó en 'created').
+ * Buscar la última conversación pendiente.
+ * Acepta 'sent' o 'created' por si el webhook llega muy rápido.
  */
 export function getLastUnanswered() {
   return new Promise((resolve, reject) => {
