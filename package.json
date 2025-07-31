@@ -1,7 +1,7 @@
 {
-  "name": "wasender-railway-bridge",
-  "version": "1.0.2",
-  "description": "Bridge API: AppCreator24 <-> Railway <-> WasenderAPI <-> WhatsApp Bot",
+  "name": "ultramsg-railway-bridge",
+  "version": "1.0.0",
+  "description": "Bridge API: AppCreator24 <-> Railway <-> UltraMsg <-> WhatsApp Bot XDATA",
   "main": "server.js",
   "type": "module",
   "scripts": {
