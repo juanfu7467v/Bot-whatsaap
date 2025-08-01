@@ -1,5 +1,4 @@
 const express = require("express");
-const bodyParser = require("body-parser");
 const axios = require("axios");
 const cors = require("cors");
 require("dotenv").config();
@@ -8,65 +7,47 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json());
 
-let ultimoResultado = {
-  tipo: null,
-  contenido: null
-};
+// Ruta para enviar comandos al bot
+app.get("/enviar", async (req, res) => {
+  const { numero, comando } = req.query;
 
-// Enviar comando
-app.post("/enviar", async (req, res) => {
-  const { comando } = req.body;
+  if (!numero || !comando) {
+    return res.status(400).json({ error: "Faltan parámetros: numero o comando" });
+  }
 
   try {
-    await axios.post(
-      "https://wasenderapi.com/api/send-message",
+    const response = await axios.post(
+      "https://wasenderapi.com/api/sendText",
       {
-        to: process.env.BOT_NUMBER,
-        text: comando
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.WASENDER_TOKEN}`,
-          "Content-Type": "application/json"
-        }
+        apiKey: process.env.API_KEY,
+        sender: process.env.SENDER,
+        number: numero,
+        message: comando
       }
     );
-    res.json({ ok: true, mensaje: "Comando enviado" });
-  } catch (err) {
-    console.error(err.response?.data || err.message);
-    res.status(500).json({ ok: false, mensaje: "Error al enviar comando" });
+
+    res.json({ estado: "Mensaje enviado", respuesta: response.data });
+  } catch (error) {
+    console.error("Error al enviar:", error?.response?.data || error.message);
+    res.status(500).json({ error: "No se pudo enviar el mensaje", detalle: error?.response?.data || error.message });
   }
 });
 
-// Webhook: recibe respuestas del bot
-app.post("/webhook", async (req, res) => {
-  const data = req.body;
-  const mensaje = data?.message?.text || null;
-  const archivo = data?.message?.file_url || null;
+// Ruta para recibir respuestas del bot
+app.post("/webhook", (req, res) => {
+  const { number, message } = req.body;
 
-  if (archivo) {
-    const tipo = archivo.endsWith(".pdf") ? "pdf" : "imagen";
-    ultimoResultado = {
-      tipo,
-      contenido: archivo
-    };
-  } else if (mensaje) {
-    ultimoResultado = {
-      tipo: "texto",
-      contenido: mensaje
-    };
-  }
+  console.log("Mensaje recibido del bot:");
+  console.log("Número:", number);
+  console.log("Mensaje:", message);
+
+  // Aquí puedes guardar en base de datos o reenviar a otro sistema
 
   res.sendStatus(200);
 });
 
-// Consultar resultado desde AppCreator
-app.get("/resultado", (req, res) => {
-  res.json(ultimoResultado);
-});
-
 app.listen(PORT, () => {
-  console.log(`Servidor corriendo en http://localhost:${PORT}`);
+  console.log(`Servidor funcionando en el puerto ${PORT}`);
 });
