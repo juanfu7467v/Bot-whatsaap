@@ -37,6 +37,24 @@ app.post('/enviar', async (req, res) => {
   }
 });
 
+// 🚨 Webhook para recibir respuestas del bot (texto, imagen o PDF)
+app.post('/webhook', async (req, res) => {
+  const data = req.body;
+
+  console.log("📥 Mensaje recibido:");
+  console.log(data);
+
+  if (data.type === 'image') {
+    console.log('🖼 Imagen:', data.caption, data.media);
+  } else if (data.type === 'document') {
+    console.log('📄 Documento:', data.caption, data.media);
+  } else if (data.type === 'chat') {
+    console.log('💬 Texto:', data.body);
+  }
+
+  res.sendStatus(200);
+});
+
 app.listen(PORT, () => {
   console.log(`Servidor escuchando en el puerto ${PORT}`);
 });
