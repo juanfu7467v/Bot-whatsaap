@@ -1,60 +1,67 @@
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
-const bodyParser = require('body-parser');
 const app = express();
+
+app.use(express.json());
 const PORT = process.env.PORT || 8080;
 
-app.use(bodyParser.json());
+const ULTRA_INSTANCE_ID = process.env.INSTANCE_ID;
+const ULTRA_TOKEN = process.env.TOKEN;
+const BOT_NUMBER = process.env.BOT_NUMBER;
 
-app.post('/enviar', async (req, res) => {
-  const { numero, mensaje } = req.body;
-
-  if (!numero || !mensaje) {
-    return res.status(400).json({ error: 'Faltan datos: número o mensaje' });
-  }
+app.post('/enviar-comando', async (req, res) => {
+  const { comando } = req.body;
 
   try {
-    const url = `https://api.ultramsg.com/${process.env.INSTANCE_ID}/messages/chat`;
-
+    // 1. Enviar el mensaje al bot de WhatsApp
+    const sendUrl = `https://api.ultramsg.com/${ULTRA_INSTANCE_ID}/messages/chat`;
     const payload = {
-      token: process.env.ULTRAMSG_TOKEN,
-      to: `+${numero}`,
-      body: mensaje,
-      priority: 10,
-      referenceId: "msg-ref-" + Date.now()
+      to: BOT_NUMBER,
+      body: comando
     };
 
-    const response = await axios.post(url, payload);
-
-    return res.json({
-      status: 'Mensaje enviado correctamente',
-      data: response.data
+    await axios.post(sendUrl, payload, {
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${ULTRA_TOKEN}`
+      }
     });
+
+    res.json({ status: 'Mensaje enviado al bot', enviado: comando });
   } catch (error) {
-    console.error('Error al enviar mensaje:', error.response?.data || error.message);
-    return res.status(500).json({ error: 'Error al enviar mensaje.' });
+    console.error('❌ Error al enviar:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Error al enviar mensaje al bot' });
   }
 });
 
-// 🚨 Webhook para recibir respuestas del bot (texto, imagen o PDF)
-app.post('/webhook', async (req, res) => {
-  const data = req.body;
+// Webhook para recibir mensajes entrantes del bot
+let ultimaRespuesta = null;
 
-  console.log("📥 Mensaje recibido:");
-  console.log(data);
+app.post('/webhook', (req, res) => {
+  const msg = req.body;
 
-  if (data.type === 'image') {
-    console.log('🖼 Imagen:', data.caption, data.media);
-  } else if (data.type === 'document') {
-    console.log('📄 Documento:', data.caption, data.media);
-  } else if (data.type === 'chat') {
-    console.log('💬 Texto:', data.body);
+  if (msg?.body && msg?.from === BOT_NUMBER) {
+    // Guardar la última respuesta
+    ultimaRespuesta = {
+      texto: msg.body,
+      tipo: msg.type === 'image' ? 'imagen' : (msg.type === 'document' ? 'pdf' : 'texto'),
+      url: msg.media ?? null
+    };
   }
 
   res.sendStatus(200);
 });
 
+// Endpoint para AppCreator24: obtener la última respuesta del bot
+app.get('/respuesta', (req, res) => {
+  if (ultimaRespuesta) {
+    res.json(ultimaRespuesta);
+  } else {
+    res.json({ texto: 'Aún no hay respuesta del bot', tipo: 'texto' });
+  }
+});
+
 app.listen(PORT, () => {
-  console.log(`Servidor escuchando en el puerto ${PORT}`);
+  console.log(`🚀 Servidor escuchando en el puerto ${PORT}`);
 });
