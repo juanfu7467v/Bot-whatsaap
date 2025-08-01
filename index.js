@@ -9,12 +9,12 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Ruta para enviar comandos al bot
+// Ruta GET para enviar comandos al bot
 app.get("/enviar", async (req, res) => {
   const { numero, comando } = req.query;
 
   if (!numero || !comando) {
-    return res.status(400).json({ error: "Faltan parámetros: numero o comando" });
+    return res.status(400).json({ error: "Faltan parámetros" });
   }
 
   try {
@@ -27,27 +27,21 @@ app.get("/enviar", async (req, res) => {
         message: comando
       }
     );
-
-    res.json({ estado: "Mensaje enviado", respuesta: response.data });
+    res.json({ ok: true, response: response.data });
   } catch (error) {
-    console.error("Error al enviar:", error?.response?.data || error.message);
-    res.status(500).json({ error: "No se pudo enviar el mensaje", detalle: error?.response?.data || error.message });
+    console.error(error?.response?.data || error.message);
+    res.status(500).json({ error: "Error al enviar", detalle: error?.response?.data || error.message });
   }
 });
 
-// Ruta para recibir respuestas del bot
+// Ruta POST para recibir webhook del bot
 app.post("/webhook", (req, res) => {
-  const { number, message } = req.body;
+  const data = req.body;
+  console.log("📥 Webhook recibido:", data);
 
-  console.log("Mensaje recibido del bot:");
-  console.log("Número:", number);
-  console.log("Mensaje:", message);
-
-  // Aquí puedes guardar en base de datos o reenviar a otro sistema
-
-  res.sendStatus(200);
+  res.sendStatus(200); // Responde OK al bot
 });
 
 app.listen(PORT, () => {
-  console.log(`Servidor funcionando en el puerto ${PORT}`);
+  console.log(`✅ Servidor funcionando en el puerto ${PORT}`);
 });
