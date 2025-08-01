@@ -15,7 +15,7 @@ let ultimoResultado = {
   contenido: null
 };
 
-// Enviar comando al bot
+// Enviar comando
 app.post("/enviar", async (req, res) => {
   const { comando } = req.body;
 
@@ -40,7 +40,7 @@ app.post("/enviar", async (req, res) => {
   }
 });
 
-// Recibir respuesta del bot
+// Webhook: recibe respuestas del bot
 app.post("/webhook", async (req, res) => {
   const data = req.body;
   const mensaje = data?.message?.text || null;
@@ -68,5 +68,5 @@ app.get("/resultado", (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Servidor escuchando en http://localhost:${PORT}`);
+  console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });
