@@ -1,32 +1,39 @@
-const axios = require("axios");
-const express = require("express");
+require('dotenv').config();
+const express = require('express');
+const axios = require('axios');
+const bodyParser = require('body-parser');
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
-app.use(express.json());
+app.use(bodyParser.json());
 
-app.post("/enviar", async (req, res) => {
-  const { numero_usuario, comando } = req.body;
+app.post('/enviar', async (req, res) => {
+  const { numero, mensaje } = req.body;
+
+  if (!numero || !mensaje) {
+    return res.status(400).json({ error: 'Faltan datos: número o mensaje' });
+  }
 
   try {
-    const respuesta = await axios.post(
-      "https://wasenderapi.com/api/sendText",
-      {
-        telefono: numero_usuario,
-        mensaje: comando,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.WASENDER_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-      }
-    );
+    const url = `https://api.ultramsg.com/${process.env.INSTANCE_ID}/messages/chat`;
 
-    res.json({ resultado: respuesta.data });
+    const payload = {
+      token: process.env.ULTRAMSG_TOKEN,
+      to: `+${numero}`,
+      body: mensaje,
+      priority: 10,
+      referenceId: "msg-ref-" + Date.now()
+    };
+
+    const response = await axios.post(url, payload);
+
+    return res.json({
+      status: 'Mensaje enviado correctamente',
+      data: response.data
+    });
   } catch (error) {
-    console.error("Error al enviar mensaje:", error.response?.data || error.message);
-    res.status(500).json({ error: "Error al enviar mensaje." });
+    console.error('Error al enviar mensaje:', error.response?.data || error.message);
+    return res.status(500).json({ error: 'Error al enviar mensaje.' });
   }
 });
 
